@@ -1,86 +1,91 @@
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
+const dotenv = require("dotenv");
+
+// Load environment variables
+dotenv.config();
 
 const app = express();
 
-// Config
-require("dotenv").config();
-
-console.log(process.env.APP_ID);
+// Check if APP_ID is available
+if (!process.env.APP_ID) {
+  console.error("APP_ID is missing from the environment variables.");
+  process.exit(1);
+}
 
 // Middleware
 app.use(express.json());
 app.use(cors());
 
-// Route
+// Convert Route
 app.get("/convert", async (req, res) => {
-  const { date, sourceCurrency, targetCurrency, amountInSourceCurrency } =
-    req.query;
+  const { date, sourceCurrency, targetCurrency, amountInSourceCurrency } = req.query;
+
+  if (!date || !sourceCurrency || !targetCurrency || !amountInSourceCurrency) {
+    return res.status(400).json({ error: "Missing required query parameters." });
+  }
 
   const currencyURL = `https://openexchangerates.org/api/historical/${date}.json?app_id=${process.env.APP_ID}`;
-  const namesURl = `https://openexchangerates.org/api/currencies.json?app_id=${process.env.APP_ID}`;
+  const namesURL = `https://openexchangerates.org/api/currencies.json`;
+
   try {
+    // Fetch exchange rates
     const response = await axios.get(currencyURL);
     const data = response.data;
 
-    // Check the data is valid
-    if (!data || response.status !== 200) {
-      throw new Error("Unable to fetch exchange rates");
+    if (response.status !== 200 || !data || !data.rates) {
+      throw new Error("Failed to fetch exchange rates.");
     }
 
     const rates = data.rates;
 
-    // Check if the entered sourceCurrency and targetCurrency are available
-    if (
-      !rates.hasOwnProperty(sourceCurrency) ||
-      !rates.hasOwnProperty(targetCurrency)
-    ) {
-      throw new Error(
-        "The entered sourceCurrency and targetCurrency are not available"
-      );
+    if (!rates[sourceCurrency] || !rates[targetCurrency]) {
+      return res.status(400).json({
+        error: "The specified source or target currency is not available.",
+      });
     }
 
-    //get the names of the currencies
-    const namesResponse = await axios.get(namesURl);
+    // Fetch currency names
+    const namesResponse = await axios.get(namesURL);
     const namesData = namesResponse.data;
 
-    //sourceCurrency name
-    const sourceCurrencyName = namesData[sourceCurrency];
-    //targetCurrency name
-    const targetCurrencyName = namesData[targetCurrency];
+    const sourceCurrencyName = namesData[sourceCurrency] || sourceCurrency;
+    const targetCurrencyName = namesData[targetCurrency] || targetCurrency;
 
-    // Perform the conversion
+    // Perform conversion
     const sourceRate = rates[sourceCurrency];
     const targetRate = rates[targetCurrency];
-
     const targetValue = (targetRate / sourceRate) * amountInSourceCurrency;
 
-    return res.json({
+    return res.status(200).json({
       amountInTargetCurrency: targetValue,
       sourceCurrencyName,
       targetCurrencyName,
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "An error occurred" });
+    console.error(err.message);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
-//all currences
+
+// Get All Currencies Route
 app.get("/getAllCurrencies", async (req, res) => {
-  const namesURl = `https://openexchangerates.org/api/currencies.json?app_id=${process.env.APP_ID}`;
+  const namesURL = `https://openexchangerates.org/api/currencies.json?app_id=${process.env.APP_ID}`;
+
   try {
-    const namesResponse = await axios.get(namesURl);
+    const namesResponse = await axios.get(namesURL);
     const namesData = namesResponse.data;
 
-    return res.json(namesData);
+    return res.status(200).json(namesData);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "An error occurred" });
+    console.error(err.message);
+    res.status(500).json({ error: "Failed to fetch currency names." });
   }
 });
 
-// Port
-app.listen(5000, () => {
-  console.log("Server started on port 5000");
+// Start Server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Server started on port ${PORT}`);
 });
